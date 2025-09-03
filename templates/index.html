@@ -1,0 +1,270 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelli-Doc AI</title>
+    <link rel="icon" type="image/png" href="{% static 'favicon.png' %}">
+    <style>
+        :root { --main-bg: #f0f4f9; --panel-bg: #ffffff; --sidebar-bg: #e1e8f0; --accent-color: #4a90e2; --text-color: #333; --border-color: #d1d9e6; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--main-bg); color: var(--text-color); margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        .app-container { display: flex; width: 100%; height: 100%; }
+        
+        /* Sidebar */
+        .sidebar { width: 260px; background-color: var(--sidebar-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; }
+        .sidebar h2 { margin: 0 0 20px 0; font-size: 1.2rem; color: var(--accent-color); }
+        .upload-btn-wrapper { position: relative; overflow: hidden; display: inline-block; width: 100%; margin-bottom: 20px; }
+        .btn { background-color: var(--accent-color); color: white; padding: 10px 15px; border-radius: 8px; border: none; font-size: 1rem; cursor: pointer; text-align: center; width: 100%; box-sizing: border-box; }
+        .upload-btn-wrapper input[type=file] { font-size: 100px; position: absolute; left: 0; top: 0; opacity: 0; }
+        #doc-list { list-style: none; padding: 0; margin: 0; }
+        #doc-list li { padding: 12px 15px; margin-bottom: 8px; border-radius: 8px; cursor: pointer; transition: background-color 0.2s; word-break: break-word; }
+        #doc-list li.active { background-color: #008080; color: white; font-weight: bold; }
+        #doc-list li:hover:not(.active) { background-color: #cdd7e1; }
+
+        /* Chat Panel */
+        .chat-panel { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--panel-bg); }
+        .chat-header { text-align: center; padding: 20px; border-bottom: 1px solid var(--border-color); }
+        .chat-header h1 { margin: 0; font-size: 1.5rem; }
+        .chat-box { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
+        .message { margin-bottom: 15px; padding: 10px 15px; border-radius: 18px; max-width: 70%; line-height: 1.5; }
+        .user-message { background-color: var(--accent-color); color: white; align-self: flex-end; }
+        .ai-message { background-color: #e9e9eb; color: #333; align-self: flex-start; }
+        .input-area { padding: 20px; border-top: 1px solid var(--border-color); display: flex; align-items: center; }
+        #question-input { flex-grow: 1; padding: 12px 18px; border: 1px solid var(--border-color); border-radius: 25px; outline: none; font-size: 1rem; resize: none; }
+        #send-btn { background: none; border: none; margin-left: 15px; cursor: pointer; color: var(--accent-color); font-size: 1.5rem; }
+        .placeholder { margin: auto; text-align: center; color: #aaa; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <h2>Recent Documents</h2>
+            <div class="upload-btn-wrapper">
+                <button class="btn">Upload New PDF</button>
+                <input type="file" id="file-input" accept=".pdf,.docx,.xlsx,.pptx" />            </div>
+              <ul id="doc-list"></ul>
+        </aside>
+ 
+        <main class="chat-panel">
+            <header class="chat-header"><h1>Intelli-Doc AI 🤖</h1></header>
+            <div class="chat-box" id="chat-box">
+                <div class="placeholder" id="placeholder">
+                    <h2>Welcome!</h2>
+                    <p>Upload a document and select it from the sidebar to begin.</p>
+                </div>
+            </div>
+            <div class="input-area">
+                <input id="question-input" placeholder="Ask a question about the selected document..." disabled>
+                <button id="send-btn" disabled>&#9658;</button>
+            </div>
+        </main>
+    </div>
+
+<script>
+    // --- STATE MANAGEMENT ---
+    const state = {
+        recentDocuments: [],
+        activeDocumentId: null,
+        chatHistories: {},
+    };
+
+    // --- DOM ELEMENTS ---
+    const fileInput = document.getElementById('file-input');
+    const docList = document.getElementById('doc-list');
+    const chatBox = document.getElementById('chat-box');
+    const questionInput = document.getElementById('question-input');
+    const sendBtn = document.getElementById('send-btn');
+    const placeholder = document.getElementById('placeholder');
+    const uploadButton = document.querySelector('.upload-btn-wrapper .btn');
+
+    // --- INITIALIZATION ---
+    document.addEventListener('DOMContentLoaded', async () => {
+        try {
+            // Fetch the list of documents currently on the server
+            const response = await fetch('/api/documents/');
+            if (!response.ok) throw new Error('Failed to fetch initial documents.');
+            state.recentDocuments = await response.json();
+
+            // --- LOAD CHATS FROM LOCALSTORAGE ---
+            const savedChats = localStorage.getItem('chatHistories');
+            if (savedChats) {
+                const parsedChats = JSON.parse(savedChats);
+                // Sync with server docs: only keep chats for documents that still exist
+                const syncedChats = {};
+                state.recentDocuments.forEach(doc => {
+                    if (parsedChats[doc.id]) {
+                        syncedChats[doc.id] = parsedChats[doc.id];
+                    }
+                });
+                state.chatHistories = syncedChats;
+            }
+            
+            // Render the initial state of the application
+            render();
+
+        } catch (error) {
+            console.error("Initialization Error:", error);
+        }
+    });
+
+    // --- EVENT LISTENERS ---
+    fileInput.addEventListener('change', handleUpload);
+    sendBtn.addEventListener('click', handleQuery);
+    questionInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleQuery();
+        }
+    });
+
+    // --- CORE LOGIC ---
+    async function handleUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        if (state.recentDocuments.length >= 3) {
+            const oldestDoc = state.recentDocuments[0];
+            const confirmed = confirm(`You have reached the 3-document limit.\n\nUploading this will delete the oldest one: "${oldestDoc.name}".\n\nDo you want to continue?`);
+            if (!confirmed) {
+                fileInput.value = '';
+                return;
+            }
+        }
+        
+        const originalBtnText = uploadButton.textContent;
+        uploadButton.textContent = 'Processing...';
+        uploadButton.disabled = true;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const uploadResponse = await fetch('/api/upload/', { method: 'POST', body: formData });
+            if (!uploadResponse.ok) throw new Error(`Upload failed with status ${uploadResponse.status}`);
+            const newDoc = await uploadResponse.json();
+
+            const docsResponse = await fetch('/api/documents/');
+            if (!docsResponse.ok) throw new Error('Failed to fetch updated documents.');
+            state.recentDocuments = await docsResponse.json();
+
+            switchDocument(newDoc.document_id);
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        } finally {
+            uploadButton.textContent = originalBtnText;
+            uploadButton.disabled = false;
+            fileInput.value = '';
+        }
+    }
+
+    function switchDocument(docId) {
+        if (state.activeDocumentId === docId) return;
+
+        state.activeDocumentId = docId;
+
+        if (!state.chatHistories[docId]) {
+            const doc = state.recentDocuments.find(d => d.id === docId);
+            const welcomeMessage = `Now chatting with "${doc.name}". Ask me anything!`;
+            state.chatHistories[docId] = [{ text: welcomeMessage, sender: 'ai' }];
+        }
+
+        render();
+    }
+
+    async function handleQuery() {
+        const question = questionInput.value.trim();
+        if (!question || !state.activeDocumentId) return;
+
+        addMessage(question, 'user');
+        questionInput.value = '';
+        addLoader();
+        
+        try {
+            const response = await fetch('/api/query/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ document_id: state.activeDocumentId, question: question }),
+            });
+            if (!response.ok) throw new Error(`Query failed with status ${response.status}`);
+
+            const data = await response.json();
+            removeLoader();
+            addMessage(data.answer, 'ai');
+        } catch (error) {
+            removeLoader();
+            addMessage(`Sorry, an error occurred: ${error.message}`, 'ai');
+        }
+    }
+
+    // --- UI RENDERING ---
+    function render() {
+        renderSidebar();
+        renderChat();
+        
+        const hasActiveDoc = !!state.activeDocumentId;
+        questionInput.disabled = !hasActiveDoc;
+        sendBtn.disabled = !hasActiveDoc;
+        placeholder.style.display = hasActiveDoc ? 'none' : 'block';
+    }
+
+    function renderSidebar() {
+        docList.innerHTML = '';
+        state.recentDocuments.forEach(doc => {
+            const li = document.createElement('li');
+            li.dataset.id = doc.id;
+            li.textContent = doc.name;
+            if (doc.id === state.activeDocumentId) {
+                li.classList.add('active');
+            }
+            li.addEventListener('click', () => switchDocument(doc.id));
+            docList.prepend(li);
+        });
+    }
+
+    function renderChat() {
+        chatBox.innerHTML = '';
+        if (state.activeDocumentId && state.chatHistories[state.activeDocumentId]) {
+            state.chatHistories[state.activeDocumentId].forEach(msg => {
+                const messageElement = createMessageElement(msg.text, msg.sender);
+                chatBox.appendChild(messageElement);
+            });
+        }
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // --- UI HELPER FUNCTIONS ---
+    function addMessage(text, sender) {
+        if (state.activeDocumentId) {
+            state.chatHistories[state.activeDocumentId].push({ text, sender });
+            
+            // --- SAVE CHATS TO LOCALSTORAGE ---
+            localStorage.setItem('chatHistories', JSON.stringify(state.chatHistories));
+        }
+        
+        const messageElement = createMessageElement(text, sender);
+        chatBox.appendChild(messageElement);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+    
+    function createMessageElement(text, sender) {
+        const element = document.createElement('div');
+        element.classList.add('message', `${sender}-message`);
+        element.textContent = text;
+        return element;
+    }
+
+    function addLoader() {
+        const loader = createMessageElement('Thinking...', 'ai');
+        loader.id = 'loader';
+        chatBox.appendChild(loader);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function removeLoader() {
+        const loader = document.getElementById('loader');
+        if (loader) loader.remove();
+    }
+</script>
+</body>
+</html>
