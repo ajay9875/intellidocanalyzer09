@@ -10,29 +10,33 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
+from decouple import config
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
+# Base directory
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Security
+SECRET_KEY = config("SECRET_KEY")
+DEBUG = config("DEBUG", default=True, cast=bool)
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
+# Hosts configuration
+BASE_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.onrender.com']
+env_hosts = config("ALLOWED_HOSTS", default='').split(',')
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-z+0d!9ce(onl!cq1n4l2(-b=$w&pj7grx_6l5xdll6kgrhd!=f'
+ALLOWED_HOSTS = [host.strip() for host in BASE_ALLOWED_HOSTS + env_hosts if host.strip()]
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# ... other settings ...
 
-ALLOWED_HOSTS = []
-
-# The URL to use when referring to static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
 
-# The list of directories where Django will look for static files
+# This tells Django where to collect all static files during deployment.
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# Optional: This tells Django where to find your project's static files during development.
 STATICFILES_DIRS = [
-    BASE_DIR / 'static',
+    os.path.join(BASE_DIR, 'static'),
 ]
 
 # Application definition
