@@ -21,14 +21,13 @@ import numpy as np
 # The key will be the user's session ID.
 # The value will be their personal OrderedDict of documents.
 multi_session_data = {}
-MAX_DOCUMENTS = 3
+MAX_DOCUMENTS = 10  # Max documents per user session
 
 # --- Load environment variables and AI models once ---
 load_dotenv()
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 llm = genai.GenerativeModel('gemini-1.5-flash')
-
 
 def get_user_session(session_id):
     """Gets or creates the document store for a specific user session."""
@@ -126,15 +125,32 @@ def query_document(document_id, question, session_id):
     context = "\n\n".join(relevant_chunks)
     
     prompt = f"""
-    You are a helpful Q&A assistant. Use the following pieces of context from a document to answer the user's question.
-    If the answer is not contained within the provided text, state that you cannot find the answer in the document.
+    Role: You are an intelligent document analysis assistant. Your purpose is to provide accurate, helpful, and professional answers based strictly on the provided document context.
+
+    Instructions:
+    1. **Context Analysis**: Thoroughly analyze the provided document context to determine if it contains relevant information to answer the question.
+
+    2. **Answering Strategy**:
+    - If the context contains clear information: Provide a comprehensive, well-structured answer in a professional tone
+    - If the context has related but not exact information: Offer the most relevant insights available and politely note any limitations
+    - If the context has no relevant information: Politely indicate this and suggest alternative approaches
+
+    3. **Greeting Handling**: If the user sends a greeting (hi, hello, etc.), respond warmly and guide them toward document-related queries
+
+    4. **Professional Tone**: Maintain a helpful, polite, and professional demeanor at all times
+    5. **Accuracy**: Never hallucinate or invent information. Stay strictly within the bounds of the provided context
 
     Context:
     {context}
 
-    Question: {question}
+    Question:
+    {question}
 
-    Answer:
+    Response Structure:
+    - Begin with appropriate acknowledgment if needed
+    - Provide clear, context-based information
+    - If context is insufficient, suggest reviewing another document or rephrasing the query
+    - Maintain professional and helpful tone throughout
     """
     
     try:
@@ -143,3 +159,15 @@ def query_document(document_id, question, session_id):
     except Exception as e:
         print(f"Error generating content: {e}")
         return f"An error occurred while generating the answer: {e}"
+    
+# In services.py, add this function:
+
+def delete_user_documents(session_id):
+    """
+    Delete all documents for a specific user session
+    """
+    if session_id in multi_session_data:
+        document_count = len(multi_session_data[session_id])
+        multi_session_data[session_id].clear()
+        return document_count
+    return 0

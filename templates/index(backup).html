@@ -19,8 +19,8 @@
             </div>
             <div class="sidebar-header">
                 <h2>Recent Documents</h2>
-                <button id="clear-chat-btn" class="clear-chat-btn" title="Clear chat history only">
-                    <i class="fas fa-comments"></i> Clear Chat
+                <button id="clear-session-btn" class="clear-btn" title="Clear chat only">
+                    <i class="fas fa-broom"></i> Clear Chat
                 </button>
             </div>
            <!-- Document list with conditional rendering -->
@@ -32,7 +32,7 @@
             </div>
             <form action="/clear-session/" method="post" id="clear-session-form">
                 {% csrf_token %}
-                <button type="submit" id="clear-session-btn" class="clear-session-btn" title="Clear entire session including documents">
+                <button type="submit" id="clear-session" class="clear-btn" title="Clear Chat & Session">
                     <i class="fas fa-broom"></i> Clear Session
                 </button>
             </form>
@@ -44,7 +44,9 @@
                 <p>Upload a document and select it from the sidebar to begin.</p>
             </div>
             <div class="chat-box" id="chat-box">
-                <div class="placeholder" id="placeholder"></div>
+                <div class="placeholder" id="placeholder">
+
+                </div>
             </div>
             <div class="input-area">
                 <input id="question-input" placeholder="Ask a question about the selected document..." disabled>
@@ -76,14 +78,13 @@ const placeholder = document.getElementById('placeholder');
 const uploadButton = document.querySelector('.upload-btn-wrapper .btn');
 const noDocumentsMsg = document.getElementById('no-documents-message');
 const sidebarHeader = document.querySelector('.sidebar-header');
-const clearSessionForm = document.getElementById('clear-session-form');
-const clearChatBtn = document.getElementById('clear-chat-btn');
 
 // --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         const response = await fetch('/api/documents/');
         
+        // Condition: Handle API response success/failure
         if (response.ok) {
             state.recentDocuments = await response.json();
         } else {
@@ -96,6 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (savedChats) {
             try {
                 const parsedChats = JSON.parse(savedChats);
+                // Additional condition: only keep chats for existing documents
                 if (state.recentDocuments && state.recentDocuments.length > 0) {
                     const syncedChats = {};
                     state.recentDocuments.forEach(doc => {
@@ -111,15 +113,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
         
-        // Add event listeners
-        if (clearSessionForm) {
-            clearSessionForm.addEventListener('submit', handleClearSession);
-        }
-        if (clearChatBtn) {
-            clearChatBtn.addEventListener('click', handleClearChat);
-        }
-        
-        // Render the initial state
+        // Render the initial state of the application
         render();
 
     } catch (error) {
@@ -143,162 +137,7 @@ questionInput.addEventListener('keypress', (e) => {
     }
 });
 
-// --- COMPLETE SESSION CLEARANCE (Documents + Chat) ---
-async function handleClearSession(event) {
-    event.preventDefault();
-    
-    const isConfirmed = confirm("🚨 Are you sure you want to clear the ENTIRE session?\n\nThis will:\n• Delete ALL uploaded documents permanently\n• Clear all chat history\n• Remove all conversation data\n• Reset the application completely\n\nThis action cannot be undone!");
-    
-    if (!isConfirmed) {
-        console.log('Full session clearance cancelled by user');
-        return;
-    }
-    
-    console.log('Starting complete session clearance...');
-    
-    try {
-        const clearBtn = document.getElementById('clear-session-btn');
-        const originalHtml = clearBtn.innerHTML;
-        clearBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing...';
-        clearBtn.disabled = true;
-
-        // 1. Clear frontend state
-        state.recentDocuments = [];
-        state.activeDocumentId = null;
-        state.chatHistories = {};
-        state.isProcessing = false;
-        
-        if (state.abortController) {
-            state.abortController.abort();
-            state.abortController = null;
-        }
-
-        // 2. Delete files from server
-        console.log('Deleting uploaded files from server...');
-        try {
-            const deleteResponse = await fetch('/api/delete-all-documents/', {
-                method: 'DELETE',
-                headers: {
-                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
-            });
-            
-            if (!deleteResponse.ok) {
-                console.warn('File deletion failed, but continuing with session clearance');
-            }
-        } catch (fileError) {
-            console.warn('File deletion error:', fileError);
-        }
-
-        // 3. Clear UI
-        chatBox.innerHTML = '';
-        placeholder.style.display = 'block';
-        questionInput.value = '';
-        questionInput.disabled = true;
-        sendBtn.disabled = true;
-        updateSendButtonState();
-        
-        const docList = document.getElementById('doc-list');
-        docList.innerHTML = '';
-        
-        if (noDocumentsMsg) {
-            noDocumentsMsg.style.display = 'block';
-        }
-        
-        const activeItems = document.querySelectorAll('.active');
-        activeItems.forEach(item => item.classList.remove('active'));
-
-        // 4. Clear storage
-        localStorage.removeItem('chatHistories');
-        sessionStorage.clear();
-
-        // 5. Clear backend session
-        const formData = new FormData();
-        formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
-        
-        const response = await fetch('/clear-session/', {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-            const successMsg = document.createElement('div');
-            successMsg.className = 'session-message success';
-            successMsg.innerHTML = '✅ Complete session cleared successfully! All files and data removed.';
-            chatBox.appendChild(successMsg);
-            
-            setTimeout(() => {
-                if (successMsg.parentNode) {
-                    successMsg.parentNode.removeChild(successMsg);
-                }
-            }, 4000);
-        } else {
-            throw new Error(result.message);
-        }
-
-    } catch (error) {
-        console.error('Error during complete session clearance:', error);
-        
-        const errorMsg = document.createElement('div');
-        errorMsg.className = 'session-message error';
-        errorMsg.innerHTML = '❌ Error clearing session. Some data may still remain.';
-        chatBox.appendChild(errorMsg);
-        
-        setTimeout(() => {
-            if (errorMsg.parentNode) {
-                errorMsg.parentNode.removeChild(errorMsg);
-            }
-        }, 4000);
-        
-    } finally {
-        const clearBtn = document.getElementById('clear-session-btn');
-        if (clearBtn) {
-            clearBtn.innerHTML = '<i class="fas fa-broom"></i> Clear Session';
-            clearBtn.disabled = false;
-        }
-        
-        render();
-    }
-}
-
-// --- CHAT ONLY CLEARANCE ---
-function handleClearChat() {
-    if (state.activeDocumentId || Object.keys(state.chatHistories).length > 0) {
-        const isConfirmed = confirm("Clear chat history?\n\nThis will remove all conversation messages but keep your uploaded documents.");
-        
-        if (!isConfirmed) {
-            console.log('Chat clearance cancelled by user');
-            return;
-        }
-        
-        state.chatHistories = {};
-        
-        localStorage.removeItem('chatHistories');
-        
-        // Show confirmation message
-        const confirmation = document.createElement('div');
-        confirmation.className = 'session-message success';
-        confirmation.innerHTML = '💬 Chat history cleared! Documents are still available.';
-        chatBox.appendChild(confirmation);
-        
-        setTimeout(() => {
-            if (confirmation.parentNode) {
-                confirmation.parentNode.removeChild(confirmation);
-            }
-        }, 3000);
-        
-        // Re-render to update UI
-        render();
-    }
-}
-
-// --- CORE LOGIC FUNCTIONS (unchanged) ---
+// --- CORE LOGIC ---
 function handleSendButtonClick() {
     if (state.isProcessing) {
         stopGeneration();
@@ -360,10 +199,198 @@ function switchDocument(docId) {
     render();
 }
 
+// --- COMPLETE SESSION CLEARANCE FUNCTION ---
+async function handleClearSession(event) {
+    // Prevent default form submission (page reload)
+   // Prevent default form submission (page reload)
+    event.preventDefault();
+    
+    // Show confirmation dialog
+    const isConfirmed = confirm("🚨 Are you sure you want to clear the entire session?\n\nThis will:\n• Delete all uploaded documents\n• Clear all chat history\n• Remove all conversation data\n• Reset the application to initial state\n\nThis action cannot be undone!");
+    
+    // If user cancels, stop here
+    if (!isConfirmed) {
+        console.log('Session clearance cancelled by user');
+        return;
+    }
+    
+    console.log('Starting complete session clearance...');
+    
+    try {
+
+        // Show loading state
+        const clearBtn = document.getElementById('clear-session');
+        const originalHtml = clearBtn.innerHTML;
+        clearBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing...';
+        clearBtn.disabled = true;
+
+        // 1. CLEAR ALL FRONTEND STATE VARIABLES
+        console.log('Clearing frontend state variables...');
+        
+        // Reset all state variables to false/null/empty
+        state.recentDocuments = [];
+        state.activeDocumentId = null;
+        state.chatHistories = {};
+        state.isProcessing = false;
+        
+        // Abort any ongoing requests
+        if (state.abortController) {
+            state.abortController.abort();
+            state.abortController = null;
+        }
+
+        // 2. DELETE ALL UPLOADED FILES FROM SERVER
+        console.log('Deleting uploaded files from server...');
+        try {
+            const deleteResponse = await fetch('/api/delete-all-documents/', {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            
+            if (!deleteResponse.ok) {
+                console.warn('File deletion failed, but continuing with session clearance');
+            }
+        } catch (fileError) {
+            console.warn('File deletion error:', fileError);
+            // Continue with session clearance even if file deletion fails
+        }
+
+        // 3. CLEAR UI COMPONENTS
+        console.log('Clearing UI components...');
+        
+        // Clear chat box
+        chatBox.innerHTML = '';
+        
+        // Show placeholder
+        placeholder.style.display = 'block';
+        
+        // Reset input field
+        questionInput.value = '';
+        questionInput.disabled = true;
+        
+        // Disable send button
+        sendBtn.disabled = true;
+        updateSendButtonState();
+        
+        // Clear document list
+        const docList = document.getElementById('doc-list');
+        docList.innerHTML = '';
+        
+        // Show empty documents message
+        const noDocumentsMsg = document.getElementById('no-documents-message');
+        if (noDocumentsMsg) {
+            noDocumentsMsg.style.display = 'block';
+        }
+        
+        // Remove active classes
+        const activeItems = document.querySelectorAll('.active');
+        activeItems.forEach(item => item.classList.remove('active'));
+
+        // 4. CLEAR ALL STORAGE
+        console.log('Clearing storage...');
+        
+        // Clear localStorage
+        localStorage.removeItem('chatHistories');
+        
+        // Clear sessionStorage
+        sessionStorage.clear();
+        
+        // Clear cookies related to the application
+        document.cookie.split(';').forEach(cookie => {
+            const cookieName = cookie.split('=')[0].trim();
+            if (cookieName.includes('session') || cookieName.includes('doc')) {
+                document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+            }
+        });
+
+        // 5. CLEAR BACKEND SESSION
+        console.log('Clearing backend session...');
+        
+        const formData = new FormData();
+        formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+        
+        const response = await fetch('/clear-session/', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            // Show success message
+            const successMsg = document.createElement('div');
+            successMsg.className = 'session-message success';
+            successMsg.innerHTML = '✅ Complete session cleared successfully! All files and data removed.';
+            chatBox.appendChild(successMsg);
+            
+            // Remove message after 4 seconds
+            setTimeout(() => {
+                if (successMsg.parentNode) {
+                    successMsg.parentNode.removeChild(successMsg);
+                }
+            }, 4000);
+            
+            console.log('Complete session clearance successful');
+        } else {
+            throw new Error(result.message);
+        }
+
+    } catch (error) {
+        console.error('Error during complete session clearance:', error);
+        
+        // Show error message
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'session-message error';
+        errorMsg.innerHTML = '❌ Error clearing session. Some data may still remain.';
+        chatBox.appendChild(errorMsg);
+        
+        // Remove message after 4 seconds
+        setTimeout(() => {
+            if (errorMsg.parentNode) {
+                errorMsg.parentNode.removeChild(errorMsg);
+            }
+        }, 4000);
+        
+    } finally {
+        // Restore clear button state
+        const clearBtn = document.getElementById('clear-session');
+        if (clearBtn) {
+            clearBtn.innerHTML = '<i class="fas fa-broom"></i> Clear Session';
+            clearBtn.disabled = false;
+        }
+        
+        // Final UI update
+        render();
+        
+        console.log('Session clearance process completed');
+    }
+}
+
+// --- ADD EVENT LISTENER TO THE FORM ---
+document.addEventListener('DOMContentLoaded', function() {
+    const clearSessionForm = document.getElementById('clear-session-form');
+    if (clearSessionForm) {
+        clearSessionForm.addEventListener('submit', handleClearSession);
+        console.log('Clear session form event listener added');
+    }
+});
+
+// --- URL PATTERN FOR FILE DELETION (add to urls.py) ---
+/*
+path('api/delete-all-documents/', views.delete_all_documents, name='delete_all_documents'),
+*/
+
 async function handleQuery() {
     const question = questionInput.value.trim();
     if (!question || !state.activeDocumentId || state.isProcessing) return;
 
+    // Create new AbortController for this request
     state.abortController = new AbortController();
     state.isProcessing = true;
     updateSendButtonState();
@@ -417,14 +444,48 @@ function updateSendButtonState() {
     }
 }
 
-// --- UI RENDERING ---
+// --- SESSION CLEAR FUNCTION ---
+function clearSession() {
+    // Condition: Only clear if there's something to clear
+    if (state.activeDocumentId || Object.keys(state.chatHistories).length > 0) {
+        state.chatHistories = {};
+        state.activeDocumentId = false;
+        
+        localStorage.removeItem('chatHistories');
+        
+        // Show confirmation message
+        const confirmation = document.createElement('div');
+        confirmation.textContent = 'Chat session cleared!';
+        confirmation.style.cssText = 'background: #4CAF50; color: white; padding: 10px; border-radius: 5px; margin: 10px 0; text-align: center;';
+        chatBox.appendChild(confirmation);
+        
+        setTimeout(() => {
+            if (confirmation.parentNode) {
+                confirmation.parentNode.removeChild(confirmation);
+            }
+        }, 2000);
+        
+        // Re-render to update UI
+        render();
+    }
+}
+
+// --- UI RENDERING WITH CONDITIONAL LOGIC ---
 function render() {
     renderSidebar();
     renderChat();
     
+    // Condition: Enable/disable input based on active document and processing state
     const hasActiveDoc = !!state.activeDocumentId;
-    questionInput.disabled = !hasActiveDoc || state.isProcessing;
-    sendBtn.disabled = !hasActiveDoc;
+    
+    if (hasActiveDoc && !state.isProcessing) {
+        questionInput.disabled = false;
+        sendBtn.disabled = false;
+    } else {
+        questionInput.disabled = true;
+        sendBtn.disabled = true;
+    }
+    
     updateSendButtonState();
 }
 
@@ -432,24 +493,33 @@ function renderSidebar() {
     const docList = document.getElementById('doc-list');
     const noDocumentsMsg = document.getElementById('no-documents-message');
     
+    // Clear existing list and buttons
     docList.innerHTML = '';
     
-    // Show/hide clear chat button based on active document
+    // Condition 1: Show/hide clear session button based on active document
     if (state.activeDocumentId || Object.keys(state.chatHistories).length > 0) {
-        if (clearChatBtn) {
-            clearChatBtn.style.display = 'block';
+        if (!document.getElementById('clear-session-btn')) {
+            const clearBtn = document.createElement('button');
+            clearBtn.id = 'clear-session-btn';
+            clearBtn.className = 'clear-btn';
+            clearBtn.title = 'Clear chat session';
+            clearBtn.innerHTML = '<i class="fas fa-broom"></i> Clear Chat';
+            clearBtn.addEventListener('click', clearSession);
+            sidebarHeader.appendChild(clearBtn);
         }
     } else {
-        if (clearChatBtn) {
-            clearChatBtn.style.display = 'none';
+        const clearBtn = document.getElementById('clear-session-btn');
+        if (clearBtn) {
+            clearBtn.remove();
         }
     }
     
+    // Condition 2: Show documents list or empty state message
     if (state.recentDocuments && state.recentDocuments.length > 0) {
         docList.style.display = 'block';
         noDocumentsMsg.style.display = 'none';
         
-        // Render in reverse order (most recent first)
+        // Render in reverse order (most recent first) - KEY CHANGE
         for (let i = state.recentDocuments.length - 1; i >= 0; i--) {
             const doc = state.recentDocuments[i];
             const li = document.createElement('li');
@@ -472,7 +542,9 @@ function renderSidebar() {
 function renderChat() {
     chatBox.innerHTML = '';
     
+    // Condition: Show chat or placeholder based on active document
     if (state.activeDocumentId && state.chatHistories[state.activeDocumentId]) {
+        // Hide placeholder, show chat messages
         placeholder.style.display = 'none';
         
         state.chatHistories[state.activeDocumentId].forEach(msg => {
@@ -480,6 +552,7 @@ function renderChat() {
             chatBox.appendChild(messageElement);
         });
     } else {
+        // Show placeholder, hide chat messages
         placeholder.style.display = 'block';
     }
     
@@ -490,6 +563,8 @@ function renderChat() {
 function addMessage(text, sender, type = 'normal') {
     if (state.activeDocumentId) {
         state.chatHistories[state.activeDocumentId].push({ text, sender, type });
+        
+        // --- SAVE CHATS TO LOCALSTORAGE ---
         localStorage.setItem('chatHistories', JSON.stringify(state.chatHistories));
     }
     
